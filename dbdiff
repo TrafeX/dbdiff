@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-#    Compare database with previous saved versions
+#    Compare database scheme with previous saved versions.
 #
 #    Copyright (c) 2012, Tim de Pater <code AT trafex DOT nl>
 #    <https://github.com/TrafeX/dbdiff>
@@ -174,7 +174,7 @@ def compare_with(host, user, password, database, version = None):
 #===== MAIN =====#
 def main():
 
-    p = argparse.ArgumentParser(description='%(prog)s - Database diff',conflict_handler='resolve')
+    p = argparse.ArgumentParser(description='%(prog)s - Compare database scheme with previous saved versions',conflict_handler='resolve')
 #    p.add_argument('--version', action='version', version='%(prog)s - '+__version__)
     p.add_argument('--database', '-d', metavar="DATABASE",
                   help="Database to use",)
@@ -185,7 +185,7 @@ def main():
     p.add_argument('--host', '-h', metavar="HOST",
                   help="Host to connect to (default: localhost)", default="localhost")
                  
-    p.add_argument('--version', '-v', dest="version", metavar="VERSIONS",
+    p.add_argument('--version', '-v', dest="version", metavar="VERSION",
                   help="The database version")
     p.add_argument('--save-version', action="store_true",
                   help="saves the current version as new")
