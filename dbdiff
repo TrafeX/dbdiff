@@ -1,0 +1,212 @@
+#!/usr/bin/env python
+#
+#    Compare database with previous saved versions
+#
+#    Copyright (c) 2012, Tim de Pater <code AT trafex DOT nl>
+#    <https://github.com/TrafeX/dbdiff>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+import os
+import sys
+import argparse
+import hashlib
+import MySQLdb
+from sqlite3 import dbapi2 as sqlite
+from difflib import unified_diff
+from datetime import datetime, date, time
+from dateutil import tz
+
+__author__ = "Tim de Pater"
+__copyright__ = "Copyright (c) 2012, Tim de Pater"
+__credits__ = ["Tim de Pater"]
+__license__ = "GPLv3"
+__version__ = "1.0.0-BETA!"
+__maintainer__ = "Tim de Pater"
+__email__ = "code@trafex.nl"
+__status__ = "Unstable"
+
+#===== CLASSES =====#
+class Database (object):
+    def __init__ (self, name, structure=None, version=None, adddate=None, moddate=None, rowid=None):
+        self.name = name;
+        self.structure = structure;
+        self.version = version;
+        self.adddate = adddate;
+        self.moddate = moddate;
+        self.rowid = rowid;
+        
+    def save(self):
+        conn = db_conn();
+        version = self.last_version()
+        version += 1
+        conn.execute("""INSERT INTO databases (name, structure,
+                                              version,adddate,moddate
+                                              )
+                        VALUES (?,?,?,datetime("now"),datetime("now"))""",
+                     [self.name,self.structure,version])
+        conn.commit();
+        
+    def last_version(self):
+        conn = db_conn();
+        cursor = conn.execute("SELECT max(version) FROM databases WHERE name = ?", [self.name]);
+        (version,) = cursor.fetchone()
+        if version == None:
+            version = 0
+        return version
+
+class DbVersions:
+    def __init__ (self):
+        self.count = 0;
+        
+    def listing(self, database):
+        conn = db_conn();
+        if database == None:
+            cursor = conn.execute("""SELECT name, structure, version, adddate, moddate, id
+                                     FROM databases ORDER BY moddate DESC""");
+        else:
+            cursor = conn.execute("""SELECT name, structure, version, adddate, moddate, id
+                                     FROM databases WHERE name = ? ORDER BY moddate DESC""", [database]);
+        self.resultset = cursor.fetchall()
+        return self
+        
+    def fetch_by_version(self, database, version):
+        conn = db_conn();
+        cursor = conn.execute("""SELECT name, structure, version, adddate, moddate, id
+                                 FROM databases WHERE name = ? AND version = ?""", [database, version]);
+        res = cursor.fetchone()
+        return self._resultset_to_class(res)
+                
+    def __iter__(self):
+        return self
+        
+    def __len__(self):
+        return len(self.resultset)
+
+    def next(self):
+        if self.count >= len(self.resultset):
+            raise StopIteration
+            
+        res = self.resultset[self.count]
+        self.count += 1
+        return self._resultset_to_class(res)
+        
+    def _resultset_to_class(self, res):
+        if res == None:
+            raise ValueError('Item not found')
+        return Database(res[0], res[1], res[2], res[3], res[4], res[5]);
+
+        
+        
+def db_conn():
+    appdir = os.path.expanduser('~') + '/.dbdiff/'
+    if not os.path.exists(appdir):
+        os.makedirs(appdir)
+
+    dbfile = appdir + 'dbdiff.db';
+    if os.path.isfile(dbfile):
+        conn = sqlite.connect(dbfile);
+    else:
+        print "Database doesn't exists, creating new";
+        conn = sqlite.connect(dbfile);
+        conn.execute("""create table databases (
+                        id integer primary key autoincrement,
+                        name varchar,
+                        structure text,
+                        version integer,
+                        adddate varchar,
+                        moddate varchar
+                        )""");
+    conn.text_factory = str
+    return conn;
+    
+def current_structure(host, user, password, database):
+    db = MySQLdb.connect(host, user, password, database)
+    cursor = db.cursor()
+
+    cursor.execute("SHOW TABLES")
+    tables = cursor.fetchall()
+    currentDb = ""
+    for (table,) in tables:
+        cursor.execute("SHOW CREATE TABLE "+table+"")
+        (t,s) = cursor.fetchone()
+        currentDb += s+"\n"
+    db.close()
+    return currentDb
+    
+def save_version(host, user, password, database):
+    dbStructure = current_structure(host, user, password, database)
+    Database(database, dbStructure).save()
+        
+def format_date(dt):
+    t = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
+    from_zone = tz.tzutc()
+    to_zone = tz.tzlocal()
+    utc = t.replace(tzinfo=from_zone)
+    return utc.astimezone(to_zone).strftime('%Y-%m-%d %H:%M:%S')
+    
+def listing(database):
+    data = DbVersions().listing(database)
+    for row in data:
+        print "Database: {0}, Version: {1}, Date: {2}, Hash: {3}".format(row.name, row.version, format_date(row.adddate), hashlib.md5(row.structure).hexdigest())
+        
+def compare_with(host, user, password, database, version = None):
+    currentDb = current_structure(host, user, password, database)
+    if version == None:
+        version = Database(database).last_version()
+    data = DbVersions().fetch_by_version(database, version)
+    prevDb = data.structure
+    for line in unified_diff(prevDb.split("\n"), currentDb.split("\n"), fromfile='version '+str(data.version), tofile='current'):
+        print line
+    
+    
+#===== MAIN =====#
+def main():
+
+    p = argparse.ArgumentParser(description='%(prog)s - Database diff',conflict_handler='resolve')
+#    p.add_argument('--version', action='version', version='%(prog)s - '+__version__)
+    p.add_argument('--database', '-d', metavar="DATABASE",
+                  help="Database to use",)
+    p.add_argument('--username', '-u', metavar="USERNAME",
+                  help="User for login (default: root)", default="root")
+    p.add_argument('--password', '-p', metavar="PASSWORD",
+                  help="Password for user")
+    p.add_argument('--host', '-h', metavar="HOST",
+                  help="Host to connect to (default: localhost)", default="localhost")
+                 
+    p.add_argument('--version', '-v', dest="version", metavar="VERSIONS",
+                  help="The database version")
+    p.add_argument('--save-version', action="store_true",
+                  help="saves the current version as new")
+    p.add_argument('--diff', action="store_true",
+                  help="compare current database with previous")
+              
+    args = p.parse_args()
+    if args.save_version:
+        save_version(args.host, args.username, args.password, args.database)
+    elif args.diff:
+        compare_with(args.host, args.username, args.password, args.database, args.version)
+    else:
+        listing(args.database)
+
+    sys.exit(0);
+
+        
+if __name__ == "__main__":
+    try:
+        main()
+    except ValueError as strerror:
+        print strerror
+    except (KeyboardInterrupt):
+        print "\nExit\n"
