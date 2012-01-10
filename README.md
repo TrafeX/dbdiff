@@ -7,13 +7,14 @@ Beware: this is a unstable version, it's possible that new versions aren't backw
 Current limitations
 ===========
 * Only supports MySQL
-* Only shows changes in the table schema, not for triggers and views
+* Only shows changes in the table schema, not for triggers and procedures
 
 Usage
 =====
 <pre>
 usage: dbdiff [--help] [--database DATABASE] [--username USERNAME]
-              [--password PASSWORD] [--host HOST] [--version VERSION] [--list]
+              [--password PASSWORD] [--host HOST] [--version VERSION]
+              [--show-schema] [--list]
 
 dbdiff - Compare database schema with previous saved versions
 
@@ -27,9 +28,9 @@ optional arguments:
                         Password for user
   --host HOST, -h HOST  Host to connect to (default: localhost)
   --version VERSION, -v VERSION
-                        The database version
-  --list                listing of all the saved versions.
-
+                        The database version (default: latest version)
+  --show-schema         show the saved schema for a specific version.
+  --list                Listing of the saved versions.
 </pre>
 
 
@@ -40,10 +41,10 @@ This tool is still in progress. If you want a feature to be added, please let me
 Roadmap
 -------
     [ ] Documentation
-    [ ] Use subcommands in the ArgumentParser for simpler usage
-    [ ] Compare views
     [ ] Multi DB-driver support
     [ ] Add option to ask for password
+    [ ] Add option to return plain output to be used by other programs
+    [X] Add option to show the schema from a version
     [ ] Use a config file for the database credentials
     [ ] Limit the number of versions to keep (configurable)
     [ ] Compare triggers

@@ -32,7 +32,7 @@ __author__ = "Tim de Pater"
 __copyright__ = "Copyright (c) 2012, Tim de Pater"
 __credits__ = ["Tim de Pater"]
 __license__ = "GPLv3"
-__version__ = "1.0.0-BETA!"
+__version__ = "1.0.0-BETA1"
 __maintainer__ = "Tim de Pater"
 __email__ = "code@trafex.nl"
 __status__ = "Unstable"
@@ -196,6 +196,15 @@ def aks_for_save(compare):
     if confirm_save == "y":
         if compare.save_version():
             print "New version saved!"
+            
+def show_schema(database, version = None):
+    if version == None:
+        version = Database(database).last_version()
+    item = DbVersions().fetch_by_version(database, version)
+    print "Database: {0}, Version: {1}, Date: {2}, Hash: {3}\n{4}\n{5}".format(
+                                                                               item.name, item.version, format_date(item.adddate),
+                                                                               hashlib.md5(item.schema).hexdigest(), ('-' * 80),
+                                                                               item.schema)
     
 #===== MAIN =====#
 def main():
@@ -210,17 +219,24 @@ def main():
                   help="Password for user")
     p.add_argument('--host', '-h', metavar="HOST",
                   help="Host to connect to (default: localhost)", default="localhost")
-                 
     p.add_argument('--version', '-v', dest="version", metavar="VERSION",
-                  help="The database version")
-                  
-                  
+                  help="The database version (default: latest version)")
+
+    p.add_argument('--show-schema', action="store_true",
+                  help="show the saved schema for a specific version.")
     p.add_argument('--list', action="store_true",
-                  help="listing of all the saved versions.")
+                  help="Listing of the saved versions.")
               
     args = p.parse_args()
+    
     if args.list:
         listing(args.database)
+    elif args.show_schema:
+        if args.database == None:
+            # TODO: Handle this with the ArgumentParser
+            print "With --show-schema the argument --database is required"
+            sys.exit(1)
+        show_schema(args.database, args.version)
     elif args.database:
         compare = Compare(args.host, args.username, args.password, args.database, args.version)
         if compare.previous_versions() == False:
