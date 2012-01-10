@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-#    Compare database scheme with previous saved versions.
+#    Compare database schema with previous saved versions.
 #
 #    Copyright (c) 2012, Tim de Pater <code AT trafex DOT nl>
 #    <https://github.com/TrafeX/dbdiff>
@@ -39,9 +39,9 @@ __status__ = "Unstable"
 
 #===== CLASSES =====#
 class Database (object):
-    def __init__ (self, name, structure=None, version=None, adddate=None, moddate=None, rowid=None):
+    def __init__ (self, name, schema=None, version=None, adddate=None, moddate=None, rowid=None):
         self.name = name;
-        self.structure = structure;
+        self.schema = schema;
         self.version = version;
         self.adddate = adddate;
         self.moddate = moddate;
@@ -51,12 +51,13 @@ class Database (object):
         conn = db_conn();
         version = self.last_version()
         version += 1
-        conn.execute("""INSERT INTO databases (name, structure,
+        conn.execute("""INSERT INTO databases (name, schema,
                                               version,adddate,moddate
                                               )
                         VALUES (?,?,?,datetime("now"),datetime("now"))""",
-                     [self.name,self.structure,version])
+                     [self.name,self.schema,version])
         conn.commit();
+        return True
         
     def last_version(self):
         conn = db_conn();
@@ -73,17 +74,17 @@ class DbVersions:
     def listing(self, database):
         conn = db_conn();
         if database == None:
-            cursor = conn.execute("""SELECT name, structure, version, adddate, moddate, id
+            cursor = conn.execute("""SELECT name, schema, version, adddate, moddate, id
                                      FROM databases ORDER BY moddate DESC""");
         else:
-            cursor = conn.execute("""SELECT name, structure, version, adddate, moddate, id
+            cursor = conn.execute("""SELECT name, schema, version, adddate, moddate, id
                                      FROM databases WHERE name = ? ORDER BY moddate DESC""", [database]);
         self.resultset = cursor.fetchall()
         return self
         
     def fetch_by_version(self, database, version):
         conn = db_conn();
-        cursor = conn.execute("""SELECT name, structure, version, adddate, moddate, id
+        cursor = conn.execute("""SELECT name, schema, version, adddate, moddate, id
                                  FROM databases WHERE name = ? AND version = ?""", [database, version]);
         res = cursor.fetchone()
         return self._resultset_to_class(res)
@@ -107,6 +108,54 @@ class DbVersions:
             raise ValueError('Item not found')
         return Database(res[0], res[1], res[2], res[3], res[4], res[5]);
 
+class Compare:
+    def __init__(self, host, user, password, database, version = None):
+        try:
+            self.last_db_version = Database(database).last_version()
+            if version == None:
+                version = self.last_db_version
+            data = DbVersions().fetch_by_version(database, version)
+            self.previousdata = data
+            self.previousschema = data.schema
+            
+        except ValueError:
+            pass
+
+        self.currentschema = self.current_schema(host, user, password, database)
+        self.database = database
+        
+    def current_schema(self, host, user, password, database):
+        db = MySQLdb.connect(host, user, password, database)
+        cursor = db.cursor()
+
+        cursor.execute("SHOW TABLES")
+        tables = cursor.fetchall()
+        currentDb = ""
+        for (table,) in tables:
+            cursor.execute("SHOW CREATE TABLE "+table+"")
+            (t,s) = cursor.fetchone()
+            currentDb += s+"\n"
+        db.close()
+        return currentDb
+            
+    def show_diff(self):
+        for line in unified_diff(self.previousschema.split("\n"), self.currentschema.split("\n"),
+                                 fromfile='version '+str(self.previousdata.version), tofile='current'):
+            print line
+            
+    def previous_versions(self):
+        try:
+            if self.previousschema != None:
+                return True
+        except AttributeError:
+            pass    
+        return False
+            
+    def schema_changed(self):
+        return (self.previousschema <> self.currentschema)
+                
+    def save_version(self):
+        return Database(self.database, self.currentschema).save()
         
         
 def db_conn():
@@ -118,37 +167,18 @@ def db_conn():
     if os.path.isfile(dbfile):
         conn = sqlite.connect(dbfile);
     else:
-        print "Database doesn't exists, creating new";
         conn = sqlite.connect(dbfile);
         conn.execute("""create table databases (
                         id integer primary key autoincrement,
                         name varchar,
-                        structure text,
+                        schema text,
                         version integer,
                         adddate varchar,
                         moddate varchar
                         )""");
     conn.text_factory = str
     return conn;
-    
-def current_structure(host, user, password, database):
-    db = MySQLdb.connect(host, user, password, database)
-    cursor = db.cursor()
-
-    cursor.execute("SHOW TABLES")
-    tables = cursor.fetchall()
-    currentDb = ""
-    for (table,) in tables:
-        cursor.execute("SHOW CREATE TABLE "+table+"")
-        (t,s) = cursor.fetchone()
-        currentDb += s+"\n"
-    db.close()
-    return currentDb
-    
-def save_version(host, user, password, database):
-    dbStructure = current_structure(host, user, password, database)
-    Database(database, dbStructure).save()
-        
+          
 def format_date(dt):
     t = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
     from_zone = tz.tzutc()
@@ -159,22 +189,18 @@ def format_date(dt):
 def listing(database):
     data = DbVersions().listing(database)
     for row in data:
-        print "Database: {0}, Version: {1}, Date: {2}, Hash: {3}".format(row.name, row.version, format_date(row.adddate), hashlib.md5(row.structure).hexdigest())
+        print "Database: {0}, Version: {1}, Date: {2}, Hash: {3}".format(row.name, row.version, format_date(row.adddate), hashlib.md5(row.schema).hexdigest())
         
-def compare_with(host, user, password, database, version = None):
-    currentDb = current_structure(host, user, password, database)
-    if version == None:
-        version = Database(database).last_version()
-    data = DbVersions().fetch_by_version(database, version)
-    prevDb = data.structure
-    for line in unified_diff(prevDb.split("\n"), currentDb.split("\n"), fromfile='version '+str(data.version), tofile='current'):
-        print line
-    
+def aks_for_save(compare):
+    confirm_save = raw_input('Do you want to save this version? (y/N): ')
+    if confirm_save == "y":
+        if compare.save_version():
+            print "New version saved!"
     
 #===== MAIN =====#
 def main():
 
-    p = argparse.ArgumentParser(description='%(prog)s - Compare database scheme with previous saved versions',conflict_handler='resolve')
+    p = argparse.ArgumentParser(description='%(prog)s - Compare database schema with previous saved versions',conflict_handler='resolve')
 #    p.add_argument('--version', action='version', version='%(prog)s - '+__version__)
     p.add_argument('--database', '-d', metavar="DATABASE",
                   help="Database to use",)
@@ -187,19 +213,31 @@ def main():
                  
     p.add_argument('--version', '-v', dest="version", metavar="VERSION",
                   help="The database version")
-    p.add_argument('--save-version', action="store_true",
-                  help="saves the current version as new")
-    p.add_argument('--diff', action="store_true",
-                  help="compare current database with previous")
+                  
+                  
+    p.add_argument('--list', action="store_true",
+                  help="listing of all the saved versions.")
               
     args = p.parse_args()
-    if args.save_version:
-        save_version(args.host, args.username, args.password, args.database)
-    elif args.diff:
-        compare_with(args.host, args.username, args.password, args.database, args.version)
-    else:
+    if args.list:
         listing(args.database)
-
+    elif args.database:
+        compare = Compare(args.host, args.username, args.password, args.database, args.version)
+        if compare.previous_versions() == False:
+            print "There are no previous versions of this database"
+            if args.version == None:
+                aks_for_save(compare)
+        else:
+            compare.show_diff()
+            if compare.schema_changed() == True:
+                print ('-' * 80) +"\nThere are changes between version "+str(compare.previousdata.version)+" and the current database schema"
+                if args.version == None or args.version == compare.last_db_version:
+                    aks_for_save(compare)
+            else:
+                print "There are no changes between version "+str(compare.previousdata.version)+" and the current database schema"
+    else:
+        p.print_help()
+        
     sys.exit(0);
 
         
