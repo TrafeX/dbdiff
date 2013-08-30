@@ -48,3 +48,7 @@ Roadmap
     [ ] Limit the number of versions to keep (configurable)
     [ ] Compare triggers
     [ ] Create a deb package
+
+
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/TrafeX/dbdiff/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+
